@@ -157,39 +157,55 @@ func (h *LogFingerHandler) DeleteFingerLog(c echo.Context) error {
             "error":   err.Error(),
         })
     }
-
-    // 2. Validasi Input
-    if request.NIK == "" || request.Timestamp == "" {
-        return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "message": "NIK dan Timestamp harus diisi",
-        })
-    }
-
-    // 3. Parsing Waktu (PENTING: Gunakan Location Asia/Jakarta)
-    // Agar "08:00" dianggap jam 8 pagi WIB, bukan jam 8 pagi UTC.
-    layout := "2006-01-02 15:04:05"
     
-    loc, err := time.LoadLocation("Asia/Jakarta")
-    if err != nil {
-        // Fallback jika server tidak ada tzdata
-        loc = time.FixedZone("WIB", 7*60*60) 
+    // Debug: Lihat data mentah yang dikirim frontend
+    fmt.Printf("Request Delete -> NIK: %s | Timestamp String: %s\n", request.NIK, request.Timestamp)
+
+    if request.NIK == "" || request.Timestamp == "" {
+        return c.JSON(http.StatusBadRequest, map[string]interface{}{"message": "NIK dan Timestamp harus diisi"})
     }
 
-    parsedTime, err := time.ParseInLocation(layout, request.Timestamp, loc)
-    if err != nil {
+    // 2. PARSING WAKTU (MULTI-FORMAT)
+    // Kita siapkan beberapa kemungkinan format agar fleksibel
+    layouts := []string{
+        "2006-01-02 15:04:05.000 -0700", // Format DETAIL (sesuai data kamu: 2025-11-27 17:18:23.838 +0700)
+        "2006-01-02 15:04:05.000",       // Format detail tanpa timezone
+        "2006-01-02 15:04:05",           // Format standar (detik 00)
+        time.RFC3339,                    // Format ISO standar (2025-11-27T17:...)
+    }
+
+    var parsedTime time.Time
+    parsedSuccess := false
+
+    for _, layout := range layouts {
+        // Coba parse
+        t, err := time.Parse(layout, request.Timestamp)
+        if err == nil {
+            parsedTime = t
+            parsedSuccess = true
+            fmt.Println("Berhasil parse dengan format:", layout) // Debug
+            break
+        }
+    }
+
+    if !parsedSuccess {
+        fmt.Println("Gagal parsing waktu. String:", request.Timestamp)
         return c.JSON(http.StatusBadRequest, map[string]interface{}{
-            "message": "Format waktu salah. Gunakan format: YYYY-MM-DD HH:mm:ss",
-            "error":   err.Error(),
+            "message": "Format waktu tidak dikenali. Pastikan format YYYY-MM-DD HH:mm:ss.SSS +0700",
         })
     }
 
-    // 4. Panggil Repository
-    err = h.Repo.DeleteFingerLog(request.NIK, parsedTime)
+    // 3. Panggil Repository
+    // Pastikan parsedTime ini memiliki presisi milidetik yang sama dengan DB
+    err := h.Repo.DeleteFingerLog(request.NIK, parsedTime)
     if err != nil {
-        // Cek apakah error karena data tidak ketemu
+        fmt.Println("Repository Error:", err.Error()) // Debug di terminal
+        
+        // Sesuaikan pesan error ini dengan return dari repo kamu
         if err.Error() == "data tidak ditemukan atau sudah terhapus" {
             return c.JSON(http.StatusNotFound, map[string]interface{}{
-                "message": "Data tidak ditemukan. Pastikan jam dan tanggal sesuai persis.",
+                "message": "Data tidak ditemukan. Kemungkinan selisih milidetik.",
+                "debug_time": parsedTime.String(),
             })
         }
         
@@ -199,12 +215,7 @@ func (h *LogFingerHandler) DeleteFingerLog(c echo.Context) error {
         })
     }
 
-    // 5. Sukses
     return c.JSON(http.StatusOK, map[string]interface{}{
         "message": "Berhasil menghapus log finger",
-        "data": map[string]interface{}{
-            "nik":       request.NIK,
-            "timestamp": request.Timestamp,
-        },
     })
 }

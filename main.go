@@ -79,5 +79,5 @@ func main() {
 	e.POST("/del", handlersensor.DeleteFingerByID)
 
 	// Jalankan server
-	e.Logger.Fatal(e.Start(":8082"))
+	e.Logger.Fatal(e.Start(":8083"))
 }
